@@ -8,7 +8,6 @@ from .autodiff import Context
 from .tensor import Tensor
 from .tensor_data import (
     MAX_DIMS,
-    Index,
     Shape,
     Strides,
     Storage,
@@ -22,6 +21,7 @@ Fn = TypeVar("Fn")
 
 
 def njit(fn: Fn, **kwargs: Any) -> Fn:
+    """Decorator to compile a function for the GPU."""
     return _njit(inline="always", **kwargs)(fn)  # type: ignore
 
 
@@ -82,16 +82,53 @@ def _tensor_conv1d(
     batch, in_channels, width = input_shape
     out_channels_, in_channels_, kw = weight_shape
 
+    # Ensure input and weight dimensions align with output
     assert (
         batch == batch_
         and in_channels == in_channels_
         and out_channels == out_channels_
     )
-    s1 = input_strides
-    s2 = weight_strides
 
-    # TODO: Implement for Task 4.1.
-    raise NotImplementedError("Need to implement for Task 4.1")
+    for out_i in prange(out_size):  # Parallelize over the output tensor
+        out_index = np.zeros(MAX_DIMS, dtype=np.int32)  # Initialize output index
+        to_index(out_i, out_shape, out_index)  # Convert flat index to multidimensional
+        current_batch, current_out_channel, current_width = out_index[:3]
+
+        # Initialize accumulator for the output value
+        acc = 0.0
+
+        for current_in_channel in range(in_channels):  # Iterate over input channels
+            for current_kw in range(kw):  # Iterate over kernel width
+                # Determine weight index (consider reverse)
+                weight_idx = index_to_position(
+                    np.array(
+                        [current_out_channel, current_in_channel, kw - current_kw - 1]
+                        if reverse
+                        else [current_out_channel, current_in_channel, current_kw],
+                        dtype=np.int32,
+                    ),
+                    weight_strides,
+                )
+
+                # Determine input index (consider reverse)
+                input_pos = (
+                    current_width - current_kw
+                    if reverse
+                    else current_width + current_kw
+                )
+                if 0 <= input_pos < width:  # Check input bounds
+                    input_idx = index_to_position(
+                        np.array(
+                            [current_batch, current_in_channel, input_pos],
+                            dtype=np.int32,
+                        ),
+                        input_strides,
+                    )
+                    acc += input[input_idx] * weight[weight_idx]
+
+        # Write accumulated value to output tensor
+        out_pos = index_to_position(out_index, out_strides)
+        out[out_pos] = acc
 
 
 tensor_conv1d = njit(_tensor_conv1d, parallel=True)
@@ -127,6 +164,7 @@ class Conv1dFun(Function):
 
     @staticmethod
     def backward(ctx: Context, grad_output: Tensor) -> Tuple[Tensor, Tensor]:
+        """Backward pass for conv1d"""
         input, weight = ctx.saved_values
         batch, in_channels, w = input.shape
         out_channels, in_channels, kw = weight.shape
@@ -203,24 +241,57 @@ def _tensor_conv2d(
         reverse (bool): anchor weight at top-left or bottom-right
 
     """
-    batch_, out_channels, _, _ = out_shape
+    batch_, out_channels, out_height, out_width = out_shape
     batch, in_channels, height, width = input_shape
     out_channels_, in_channels_, kh, kw = weight_shape
 
+    # Ensure dimensions match
     assert (
         batch == batch_
         and in_channels == in_channels_
         and out_channels == out_channels_
     )
 
-    s1 = input_strides
-    s2 = weight_strides
-    # inners
-    s10, s11, s12, s13 = s1[0], s1[1], s1[2], s1[3]
-    s20, s21, s22, s23 = s2[0], s2[1], s2[2], s2[3]
+    for out_i in prange(out_size):  # Parallelize over the flattened output tensor
+        out_index = np.zeros(MAX_DIMS, dtype=np.int32)
+        to_index(out_i, out_shape, out_index)
+        current_batch, current_out_channel, current_height, current_width = out_index
 
-    # TODO: Implement for Task 4.2.
-    raise NotImplementedError("Need to implement for Task 4.2")
+        acc = 0.0  # Accumulator for the convolution sum
+
+        for current_in_channel in range(in_channels):  # Iterate over input channels
+            for current_kh in range(kh):  # Iterate over kernel height
+                for current_kw in range(kw):  # Iterate over kernel width
+                    # Calculate kernel and input indices based on reverse logic
+                    i = current_kh if not reverse else kh - current_kh - 1
+                    j = current_kw if not reverse else kw - current_kw - 1
+
+                    # Calculate weight index
+                    weight_idx = index_to_position(
+                        np.array(
+                            [current_out_channel, current_in_channel, i, j],
+                            dtype=np.int32,
+                        ),
+                        weight_strides,
+                    )
+
+                    # Calculate input index
+                    input_h = current_height + i if not reverse else current_height - i
+                    input_w = current_width + j if not reverse else current_width - j
+
+                    if 0 <= input_h < height and 0 <= input_w < width:  # Check bounds
+                        input_idx = index_to_position(
+                            np.array(
+                                [current_batch, current_in_channel, input_h, input_w],
+                                dtype=np.int32,
+                            ),
+                            input_strides,
+                        )
+                        acc += input[input_idx] * weight[weight_idx]
+
+        # Write the accumulated value to the output tensor
+        out_pos = index_to_position(out_index, out_strides)
+        out[out_pos] = acc
 
 
 tensor_conv2d = njit(_tensor_conv2d, parallel=True, fastmath=True)
@@ -254,6 +325,7 @@ class Conv2dFun(Function):
 
     @staticmethod
     def backward(ctx: Context, grad_output: Tensor) -> Tuple[Tensor, Tensor]:
+        """Backward pass for conv2d"""
         input, weight = ctx.saved_values
         batch, in_channels, h, w = input.shape
         out_channels, in_channels, kh, kw = weight.shape

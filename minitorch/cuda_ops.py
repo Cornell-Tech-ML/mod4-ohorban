@@ -29,11 +29,13 @@ FakeCUDAKernel = Any
 Fn = TypeVar("Fn")
 
 
-def device_jit(fn: Fn, **kwargs) -> Fn:
+def device_jit(fn: Fn, **kwargs: Any) -> Fn:
+    """Decorator to compile a function for the GPU."""
     return _jit(device=True, **kwargs)(fn)  # type: ignore
 
 
-def jit(fn, **kwargs) -> FakeCUDAKernel:
+def jit(fn: Fn, **kwargs: Any) -> FakeCUDAKernel:
+    """Decorator to compile a function for the GPU."""
     return _jit(**kwargs)(fn)  # type: ignore
 
 
@@ -152,6 +154,7 @@ def tensor_map(fn: Callable[[float], float]) -> Any:
         fn_map(out, ... )
 
     Args:
+    ----
     fn: function mappings floats-to-floats to apply.
     out (Storage): storage for out tensor.
     out_shape (Shape): shape for out tensor.
@@ -162,9 +165,11 @@ def tensor_map(fn: Callable[[float], float]) -> Any:
     in_strides (Strides): strides for in tensor.
 
     Returns:
+    -------
     None : Fills in `out`
 
     """
+
     def _map(
         out: Storage,
         out_shape: Shape,
@@ -189,13 +194,13 @@ def tensor_map(fn: Callable[[float], float]) -> Any:
     return cuda.jit()(_map)
 
 
-
 def tensor_zip(fn: Callable[[float, float], float]) -> Any:
     """CUDA higher-order tensor zipWith (or map2) function ::
         fn_zip = tensor_zip(fn)
         fn_zip(out, ...)
 
     Args:
+    ----
     fn: function mappings two floats to float to apply.
     out (array): storage for `out` tensor.
     out_shape (array): shape for `out` tensor.
@@ -209,9 +214,11 @@ def tensor_zip(fn: Callable[[float, float], float]) -> Any:
     b_strides (array): strides for `b` tensor.
 
     Returns:
+    -------
     None : Fills in `out`
 
     """
+
     def _zip(
         out: Storage,
         out_shape: Shape,
@@ -240,7 +247,6 @@ def tensor_zip(fn: Callable[[float, float], float]) -> Any:
         # END ASSIGN3.3
 
     return cuda.jit()(_zip)
-
 
 
 def _sum_practice(out: Storage, a: Storage, size: int) -> None:
@@ -276,6 +282,7 @@ def _sum_practice(out: Storage, a: Storage, size: int) -> None:
             out[cuda.blockIdx.x] = cache[0]
     # END ASSIGN3.3
 
+
 jit_sum_practice = cuda.jit()(_sum_practice)
 
 
@@ -296,6 +303,7 @@ def tensor_reduce(fn: Callable[[float, float], float]) -> Any:
     """CUDA higher-order tensor reduce function.
 
     Args:
+    ----
     fn: reduction function maps two floats to float.
     out (Storage): storage for `out` tensor.
     out_shape (Shape): shape for `out` tensor.
@@ -307,6 +315,7 @@ def tensor_reduce(fn: Callable[[float, float], float]) -> Any:
     reduce_dim (int): dimension to reduce out
 
     """
+
     def _reduce(
         out: Storage,
         out_shape: Shape,
@@ -348,7 +357,6 @@ def tensor_reduce(fn: Callable[[float, float], float]) -> Any:
     return cuda.jit()(_reduce)
 
 
-
 def _mm_practice(out: Storage, a: Storage, b: Storage, size: int) -> None:
     """Practice square MM kernel to prepare for matmul.
     Given a storage `out` and two storage `a` and `b`. Where we know
@@ -365,6 +373,7 @@ def _mm_practice(out: Storage, a: Storage, b: Storage, size: int) -> None:
                 out[i, j] += a[i, k] * b[k, j]
 
     Args:
+    ----
     out (Storage): storage for `out` tensor.
     a (Storage): storage for `a` tensor.
     b (Storage): storage for `b` tensor.
@@ -391,8 +400,8 @@ def _mm_practice(out: Storage, a: Storage, b: Storage, size: int) -> None:
     out[size * i + j] = accum
     # END ASSIGN3.3
 
-jit_mm_practice = cuda.jit()(_mm_practice)
 
+jit_mm_practice = cuda.jit()(_mm_practice)
 
 
 def mm_practice(a: Tensor, b: Tensor) -> TensorData:
@@ -473,5 +482,6 @@ def _tensor_matrix_multiply(
     if i < out_shape[1] and j < out_shape[2]:
         out[out_strides[0] * batch + out_strides[1] * i + out_strides[2] * j] = accum
     # END ASSIGN3.4
+
 
 tensor_matrix_multiply = cuda.jit(_tensor_matrix_multiply)

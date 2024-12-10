@@ -30,6 +30,7 @@ Fn = TypeVar("Fn")
 
 
 def njit(fn: Fn, **kwargs: Any) -> Fn:
+    """Decorator to JIT compile a function with NUMBA."""
     return _njit(inline="always", **kwargs)(fn)  # type: ignore
 
 
@@ -154,6 +155,7 @@ def tensor_map(fn: Callable[[float], float]) -> Any:
     in_shape (Shape): shape for in tensor.
     in_strides (Strides): strides for in tensor.
     """
+
     def _map(
         out: Storage,
         out_shape: Shape,
@@ -184,7 +186,6 @@ def tensor_map(fn: Callable[[float], float]) -> Any:
     return njit(_map, parallel=True)
 
 
-
 def tensor_zip(fn: Callable[[float, float], float]) -> Any:
     """NUMBA higher-order tensor zip function. See `tensor_ops.py` for description.
     Optimizations:
@@ -203,6 +204,7 @@ def tensor_zip(fn: Callable[[float, float], float]) -> Any:
     b_shape (array): shape for `b` tensor.
     b_strides (array): strides for `b` tensor.
     """
+
     def _zip(
         out: Storage,
         out_shape: Shape,
@@ -238,8 +240,8 @@ def tensor_zip(fn: Callable[[float, float], float]) -> Any:
             for i in prange(len(out)):
                 out[i] = fn(a_storage[i], b_storage[i])
         # END ASSIGN3.1
-    return njit(_zip, parallel=True)
 
+    return njit(_zip, parallel=True)
 
 
 def tensor_reduce(fn: Callable[[float, float], float]) -> Any:
@@ -258,6 +260,7 @@ def tensor_reduce(fn: Callable[[float, float], float]) -> Any:
     a_strides (Strides): strides for `a` tensor.
     reduce_dim (int): dimension to reduce out
     """
+
     def _reduce(
         out: Storage,
         out_shape: Shape,
@@ -285,7 +288,6 @@ def tensor_reduce(fn: Callable[[float, float], float]) -> Any:
     return njit(_reduce, parallel=True)
 
 
-
 def _tensor_matrix_multiply(
     out: Storage,
     out_shape: Shape,
@@ -304,7 +306,9 @@ def _tensor_matrix_multiply(
     * Outer loop in parallel
     * No index buffers or function calls
     * Inner loop should have no global writes, 1 multiply.
+
     Args:
+    ----
     out (Storage): storage for `out` tensor
     out_shape (Shape): shape for `out` tensor
     out_strides (Strides): strides for `out` tensor
@@ -316,6 +320,7 @@ def _tensor_matrix_multiply(
     b_strides (Strides): strides for `b` tensor
     Returns:
     None : Fills in `out`
+
     """
     a_batch_stride = a_strides[0] if a_shape[0] > 1 else 0
     b_batch_stride = b_strides[0] if b_shape[0] > 1 else 0
@@ -337,8 +342,8 @@ def _tensor_matrix_multiply(
                 out[out_position] = acc
     # END ASSIGN3.2
 
-tensor_matrix_multiply = njit(_tensor_matrix_multiply, parallel=True, fastmath=True)
 
+tensor_matrix_multiply = njit(_tensor_matrix_multiply, parallel=True, fastmath=True)
 
 
 tensor_matrix_multiply = njit(_tensor_matrix_multiply, parallel=True)
