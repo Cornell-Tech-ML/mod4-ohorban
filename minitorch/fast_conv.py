@@ -82,7 +82,6 @@ def _tensor_conv1d(
     batch, in_channels, width = input_shape
     out_channels_, in_channels_, kw = weight_shape
 
-    # Ensure input and weight dimensions align with output
     assert (
         batch == batch_
         and in_channels == in_channels_
@@ -94,12 +93,10 @@ def _tensor_conv1d(
         to_index(out_i, out_shape, out_index)  # Convert flat index to multidimensional
         current_batch, current_out_channel, current_width = out_index[:3]
 
-        # Initialize accumulator for the output value
         acc = 0.0
 
-        for current_in_channel in range(in_channels):  # Iterate over input channels
-            for current_kw in range(kw):  # Iterate over kernel width
-                # Determine weight index (consider reverse)
+        for current_in_channel in range(in_channels):
+            for current_kw in range(kw):
                 weight_idx = index_to_position(
                     np.array(
                         [current_out_channel, current_in_channel, kw - current_kw - 1]
@@ -110,13 +107,12 @@ def _tensor_conv1d(
                     weight_strides,
                 )
 
-                # Determine input index (consider reverse)
                 input_pos = (
                     current_width - current_kw
                     if reverse
                     else current_width + current_kw
                 )
-                if 0 <= input_pos < width:  # Check input bounds
+                if 0 <= input_pos < width:
                     input_idx = index_to_position(
                         np.array(
                             [current_batch, current_in_channel, input_pos],
@@ -126,7 +122,6 @@ def _tensor_conv1d(
                     )
                     acc += input[input_idx] * weight[weight_idx]
 
-        # Write accumulated value to output tensor
         out_pos = index_to_position(out_index, out_strides)
         out[out_pos] = acc
 
@@ -235,9 +230,9 @@ def _tensor_conv2d(
         input (Storage): storage for `input` tensor.
         input_shape (Shape): shape for `input` tensor.
         input_strides (Strides): strides for `input` tensor.
-        weight (Storage): storage for `input` tensor.
-        weight_shape (Shape): shape for `input` tensor.
-        weight_strides (Strides): strides for `input` tensor.
+        weight (Storage): storage for `weight` tensor.
+        weight_shape (Shape): shape for `weight` tensor.
+        weight_strides (Strides): strides for `weight` tensor.
         reverse (bool): anchor weight at top-left or bottom-right
 
     """
@@ -245,53 +240,57 @@ def _tensor_conv2d(
     batch, in_channels, height, width = input_shape
     out_channels_, in_channels_, kh, kw = weight_shape
 
-    # Ensure dimensions match
     assert (
         batch == batch_
         and in_channels == in_channels_
         and out_channels == out_channels_
     )
 
-    for out_i in prange(out_size):  # Parallelize over the flattened output tensor
-        out_index = np.zeros(MAX_DIMS, dtype=np.int32)
-        to_index(out_i, out_shape, out_index)
-        current_batch, current_out_channel, current_height, current_width = out_index
+    s10, s11, s12, s13 = input_strides
+    s20, s21, s22, s23 = weight_strides
 
-        acc = 0.0  # Accumulator for the convolution sum
+    for current_batch in prange(batch_):
+        for current_out_channel in prange(out_channels):
+            for current_height in prange(out_height):
+                for current_width in prange(out_width):
+                    acc = 0.0
 
-        for current_in_channel in range(in_channels):  # Iterate over input channels
-            for current_kh in range(kh):  # Iterate over kernel height
-                for current_kw in range(kw):  # Iterate over kernel width
-                    # Calculate kernel and input indices based on reverse logic
-                    i = current_kh if not reverse else kh - current_kh - 1
-                    j = current_kw if not reverse else kw - current_kw - 1
+                    for current_in_channel in range(in_channels):
+                        for current_kh in range(kh):
+                            for current_kw in range(kw):
+                                input_h = (
+                                    current_height - current_kh
+                                    if reverse
+                                    else current_height + current_kh
+                                )
+                                input_w = (
+                                    current_width - current_kw
+                                    if reverse
+                                    else current_width + current_kw
+                                )
 
-                    # Calculate weight index
-                    weight_idx = index_to_position(
-                        np.array(
-                            [current_out_channel, current_in_channel, i, j],
-                            dtype=np.int32,
-                        ),
-                        weight_strides,
+                                if 0 <= input_h < height and 0 <= input_w < width:
+                                    input_idx = (
+                                        current_batch * s10
+                                        + current_in_channel * s11
+                                        + input_h * s12
+                                        + input_w * s13
+                                    )
+                                    weight_idx = (
+                                        current_out_channel * s20
+                                        + current_in_channel * s21
+                                        + current_kh * s22
+                                        + current_kw * s23
+                                    )
+                                    acc += input[input_idx] * weight[weight_idx]
+
+                    out_idx = (
+                        current_batch * out_strides[0]
+                        + current_out_channel * out_strides[1]
+                        + current_height * out_strides[2]
+                        + current_width * out_strides[3]
                     )
-
-                    # Calculate input index
-                    input_h = current_height + i if not reverse else current_height - i
-                    input_w = current_width + j if not reverse else current_width - j
-
-                    if 0 <= input_h < height and 0 <= input_w < width:  # Check bounds
-                        input_idx = index_to_position(
-                            np.array(
-                                [current_batch, current_in_channel, input_h, input_w],
-                                dtype=np.int32,
-                            ),
-                            input_strides,
-                        )
-                        acc += input[input_idx] * weight[weight_idx]
-
-        # Write the accumulated value to the output tensor
-        out_pos = index_to_position(out_index, out_strides)
-        out[out_pos] = acc
+                    out[out_idx] = acc
 
 
 tensor_conv2d = njit(_tensor_conv2d, parallel=True, fastmath=True)
