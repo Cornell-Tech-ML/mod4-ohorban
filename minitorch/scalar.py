@@ -8,15 +8,16 @@ import numpy as np
 from dataclasses import field
 from .autodiff import Context, Variable, backpropagate, central_difference
 from .scalar_functions import (
-    EQ,
-    LT,
+    Eq,
+    Lt,
     Add,
+    Sub,
     Exp,
     Inv,
     Log,
     Mul,
     Neg,
-    ReLU,
+    Relu,
     ScalarFunction,
     Sigmoid,
 )
@@ -73,9 +74,6 @@ class Scalar:
     def __repr__(self) -> str:
         return f"Scalar({self.data})"
 
-    def __mul__(self, b: ScalarLike) -> Scalar:
-        return Mul.apply(self, b)
-
     def __truediv__(self, b: ScalarLike) -> Scalar:
         return Mul.apply(self, Inv.apply(b))
 
@@ -112,21 +110,37 @@ class Scalar:
         return self.history is not None and self.history.last_fn is None
 
     def is_constant(self) -> bool:
+        """True if this variable is a constant (no derivative)"""
         return self.history is None
 
     @property
     def parents(self) -> Iterable[Variable]:
-        """Get the variables used to create this one."""
+        """Returns the input variables of the last function that created this variable."""
         assert self.history is not None
         return self.history.inputs
 
     def chain_rule(self, d_output: Any) -> Iterable[Tuple[Variable, Any]]:
+        """Compute the chain rule for the derivatives of the inputs."""
+        # Retrieve the history
         h = self.history
-        assert h is not None
-        assert h.last_fn is not None
-        assert h.ctx is not None
+        assert h is not None, "No history found for this scalar."
+        assert h.last_fn is not None, "No last function found for this scalar."
+        assert h.ctx is not None, "No context found for this scalar."
 
-        raise NotImplementedError("Need to include this file from past assignment.")
+        # Get the last function and the saved inputs for the current scalar
+        last_fn = h.last_fn
+        inputs = h.inputs
+        ctx = h.ctx
+
+        # Compute the local derivatives using the backward function of the last function
+        local_derivatives = last_fn._backward(ctx, d_output)
+
+        # Pair each local derivative with the corresponding input variable
+        return [
+            (input_var, local_derivatives[i])
+            for i, input_var in enumerate(inputs)
+            if not input_var.is_constant()
+        ]
 
     def backward(self, d_output: Optional[float] = None) -> None:
         """Calls autodiff to fill in the derivatives for the history of this object.
@@ -141,17 +155,61 @@ class Scalar:
             d_output = 1.0
         backpropagate(self, d_output)
 
-    raise NotImplementedError("Need to include this file from past assignment.")
+    def __add__(self, other: ScalarLike) -> Scalar:
+        return Add.apply(self, other)
+
+    def __sub__(self, other: ScalarLike) -> Scalar:
+        return Sub.apply(self, other)
+
+    def __neg__(self) -> Scalar:
+        return Neg.apply(self)
+
+    def __mul__(self, other: ScalarLike) -> Scalar:
+        return Mul.apply(self, other)
+
+    def __lt__(self, other: ScalarLike) -> Scalar:
+        return Lt.apply(self, other)
+
+    def __eq__(self, other: ScalarLike) -> Scalar:
+        return Eq.apply(self, other)
+
+    def log(self) -> Scalar:
+        """Return the natural logarithm of the scalar."""
+        return Log.apply(self)
+
+    def exp(self) -> Scalar:
+        """Return the exponential of the scalar."""
+        return Exp.apply(self)
+
+    def sigmoid(self) -> Scalar:
+        """Return the sigmoid of the scalar."""
+        return Sigmoid.apply(self)
+
+    def relu(self) -> Scalar:
+        """Return the ReLU of the scalar."""
+        return Relu.apply(self)
+
+    def __hash__(self):
+        """Use unique_id for hashing to allow Scalar objects to be used in sets."""
+        return hash(self.unique_id)
 
 
 def derivative_check(f: Any, *scalars: Scalar) -> None:
-    """Checks that autodiff works on a python function.
-    Asserts False if derivative is incorrect.
+    """Checks the correctness of autodiff by comparing the computed derivatives with central difference approximations.
 
-    Parameters
-    ----------
-        f : function from n-scalars to 1-scalar.
-        *scalars  : n input scalar values.
+    Asserts False if the derivative calculated by autodiff differs significantly from the central difference approximation.
+
+    Args:
+    ----
+        f: A function that takes n-scalars as input and returns a single scalar as output.
+           This is the function whose derivatives we want to check.
+        *scalars: A variable number of Scalar objects that are the inputs to the function `f`.
+                  These scalars will be used to compute and verify the derivatives.
+
+    Returns:
+    -------
+        None: The function raises an assertion error if the autodiff derivatives do not match
+              the central difference approximation.
 
     """
     out = f(*scalars)
